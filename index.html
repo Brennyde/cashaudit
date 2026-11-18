@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b1220">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Cash Audits">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <title>Cash Audit Tracker</title>
+  <style>
+    :root{color-scheme:light dark;--bg:#f3f5f7;--card:#fff;--text:#17202a;--muted:#667085;--line:#d0d5dd;--brand:#0050c8;--danger:#b42318;--dangerbg:#fee4e2;--warn:#b54708;--warnbg:#fffaeb;--ok:#027a48;--okbg:#ecfdf3}
+    @media(prefers-color-scheme:dark){:root{--bg:#0b1220;--card:#151f2e;--text:#f2f4f7;--muted:#98a2b3;--line:#344054;--brand:#6aa5ff;--danger:#f97066;--dangerbg:#4a1f22;--warn:#fdb022;--warnbg:#3b2d11;--ok:#32d583;--okbg:#123325}}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif} button,input{font:inherit}
+    .wrap{max-width:760px;margin:auto;padding:max(18px,env(safe-area-inset-top)) 16px max(28px,env(safe-area-inset-bottom))}
+    header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:18px}h1{font-size:26px;margin:0}.sub{color:var(--muted);font-size:14px;margin-top:3px}
+    .panel,.store{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 3px 12px rgba(0,0,0,.06)}
+    .panel{padding:14px;margin-bottom:16px}.add{display:grid;grid-template-columns:1fr auto;gap:10px}.add input{min-width:0;padding:13px;border-radius:11px;border:1px solid var(--line);background:transparent;color:var(--text)}
+    button{border:0;border-radius:11px;padding:12px 14px;font-weight:700;cursor:pointer}.primary{background:var(--brand);color:white}.ghost{background:transparent;color:var(--muted);border:1px solid var(--line)}.complete{background:var(--ok);color:white;flex:1}.delete{background:transparent;color:var(--danger);border:1px solid currentColor}
+    .summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}.summary div{padding:10px;border-radius:10px;background:var(--bg);text-align:center}.summary b{display:block;font-size:19px}.summary span{font-size:12px;color:var(--muted)}
+    #list{display:grid;gap:12px}.store{padding:15px;border-left:7px solid var(--ok)}.store.warning{border-left-color:var(--danger);background:var(--dangerbg)}.store.overdue{border-left-color:var(--danger);background:var(--dangerbg)}.store.never{border-left-color:var(--warn);background:var(--warnbg)}
+    .top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}.name{font-size:19px;font-weight:800;overflow-wrap:anywhere}.badge{white-space:nowrap;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800;background:var(--okbg);color:var(--ok)}.warning .badge,.overdue .badge{background:var(--danger);color:white}.never .badge{background:var(--warn);color:white}
+    .dates{color:var(--muted);font-size:14px;line-height:1.55;margin:10px 0}.actions{display:flex;gap:8px}.empty{text-align:center;color:var(--muted);padding:32px 15px}.tools{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}.tools button{font-size:13px;padding:9px 11px}
+    #msg{min-height:22px;color:var(--danger);font-size:13px;margin-top:7px}.hidden{display:none!important}
+    @media(max-width:430px){.add{grid-template-columns:1fr}.summary{grid-template-columns:repeat(3,1fr)}.actions{flex-direction:column}.delete,.complete{width:100%}}
+  </style>
+</head>
+<body><main class="wrap">
+  <header><div><h1>Cash Audit Tracker</h1><div class="sub">30-day cycle · red when 7 days remain</div></div></header>
+  <section class="panel">
+    <form id="addForm" class="add"><label class="hidden" for="storeName">Store name</label><input id="storeName" maxlength="60" placeholder="Add store (e.g. G102)" autocomplete="off"><button class="primary" type="submit">Add store</button></form>
+    <div id="msg" role="alert"></div>
+    <div class="summary"><div><b id="total">0</b><span>Stores</span></div><div><b id="dueSoon">0</b><span>Due soon</span></div><div><b id="overdue">0</b><span>Overdue</span></div></div>
+    <div class="tools"><button id="exportBtn" class="ghost" type="button">Export backup</button><button id="importBtn" class="ghost" type="button">Import backup</button><input id="importFile" class="hidden" type="file" accept="application/json"></div>
+  </section>
+  <section id="list" aria-live="polite"></section>
+</main>
+<script>
+(()=>{
+ const KEY='cash-audit-tracker-v1', DAY=86400000, DEADLINE=30, RED_AT=7;
+ const el=id=>document.getElementById(id); let stores=load();
+ function load(){try{const v=JSON.parse(localStorage.getItem(KEY)||'[]');return Array.isArray(v)?v:[]}catch{return[]}}
+ function save(){localStorage.setItem(KEY,JSON.stringify(stores));render()}
+ function today(){const d=new Date();return new Date(d.getFullYear(),d.getMonth(),d.getDate())}
+ function parseDate(s){if(!s)return null;const [y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d)}
+ function dateKey(d=new Date()){return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-')}
+ function fmt(d){return new Intl.DateTimeFormat('en-AU',{day:'numeric',month:'short',year:'numeric'}).format(d)}
+ function status(s){const last=parseDate(s.lastAudit);if(!last)return{kind:'never',label:'Audit required',used:null,left:null,due:null};const used=Math.floor((today()-last)/DAY);const left=DEADLINE-used;const due=new Date(last.getTime()+DEADLINE*DAY);return{kind:left<0?'overdue':left<=RED_AT?'warning':'ok',label:left<0?`${Math.abs(left)} day${Math.abs(left)==1?'':'s'} overdue`:`${left} day${left==1?'':'s'} remaining`,used,left,due}}
+ function esc(x){return String(x).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
+ function render(){stores.sort((a,b)=>{const A=status(a),B=status(b);const rank={overdue:0,warning:1,never:2,ok:3};return rank[A.kind]-rank[B.kind]||a.name.localeCompare(b.name)});el('list').innerHTML=stores.length?stores.map(s=>{const st=status(s),last=parseDate(s.lastAudit);return `<article class="store ${st.kind}"><div class="top"><div class="name">${esc(s.name)}</div><div class="badge">${esc(st.label)}</div></div><div class="dates">Last audit: <b>${last?fmt(last):'Not recorded'}</b>${st.due?`<br>30-day deadline: <b>${fmt(st.due)}</b>`:''}</div><div class="actions"><button class="complete" type="button" data-action="done" data-id="${s.id}">Audit complete today</button><button class="delete" type="button" data-action="delete" data-id="${s.id}">Delete</button></div></article>`}).join(''):'<div class="panel empty">Add your first store above.</div>';
+ const stats=stores.map(status);el('total').textContent=stores.length;el('dueSoon').textContent=stats.filter(x=>x.kind==='warning').length;el('overdue').textContent=stats.filter(x=>x.kind==='overdue'||x.kind==='never').length}
+ el('addForm').addEventListener('submit',e=>{e.preventDefault();const input=el('storeName'),name=input.value.trim();el('msg').textContent='';if(!name){el('msg').textContent='Enter a store name.';return}if(stores.some(s=>s.name.toLowerCase()===name.toLowerCase())){el('msg').textContent='That store is already in the list.';return}stores.push({id:crypto.randomUUID?crypto.randomUUID():Date.now().toString(),name,lastAudit:null});input.value='';save()});
+ el('list').addEventListener('click',e=>{const b=e.target.closest('button[data-action]');if(!b)return;const s=stores.find(x=>x.id===b.dataset.id);if(!s)return;if(b.dataset.action==='done'){if(confirm(`Mark ${s.name} audit complete today?`)){s.lastAudit=dateKey();save()}}else if(confirm(`Delete ${s.name}?`)){stores=stores.filter(x=>x.id!==s.id);save()}});
+ el('exportBtn').addEventListener('click',()=>{const blob=new Blob([JSON.stringify({version:1,exportedAt:new Date().toISOString(),stores},null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`cash-audits-${dateKey()}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)});
+ el('importBtn').addEventListener('click',()=>el('importFile').click());el('importFile').addEventListener('change',async e=>{try{const data=JSON.parse(await e.target.files[0].text()),arr=Array.isArray(data)?data:data.stores;if(!Array.isArray(arr))throw 0;stores=arr.filter(x=>x&&typeof x.name==='string').map(x=>({id:x.id||Math.random().toString(36).slice(2),name:x.name.slice(0,60),lastAudit:/^\d{4}-\d{2}-\d{2}$/.test(x.lastAudit||'')?x.lastAudit:null}));save();el('msg').textContent=''}catch{el('msg').textContent='That backup file could not be imported.'}e.target.value=''});
+ if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});render();
+})();
+</script></body></html>
